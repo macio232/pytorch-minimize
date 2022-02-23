@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 packages = [
     'numpy',
@@ -13,6 +13,6 @@ setup(name='torchmin',
       author=' Reuben Feinman',
       author_email='',
       license='MIT Licence',
-      packages=['torchmin'],
+      packages=find_packages(),
 	    zip_safe=False,
       install_requires=packages)
