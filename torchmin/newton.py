@@ -1,11 +1,15 @@
 from scipy.optimize import OptimizeResult
-from scipy.optimize.optimize import _status_message
 from scipy.sparse.linalg import eigsh
 from torch import Tensor
 import torch
 
 from .function import ScalarFunction
 from .line_search import strong_wolfe
+
+try:
+    from scipy.optimize.optimize import _status_message
+except ImportError:
+    from scipy.optimize._optimize import _status_message
 
 _status_message['cg_warn'] = "Warning: CG iterations didn't converge. The " \
                              "Hessian is not positive definite."
@@ -316,24 +320,25 @@ def _minimize_newton_exact(
             nfail += 1
             if handle_npd == 'lu':
                 d = torch.linalg.solve(hess, g.neg())
-            elif handle_npd == 'grad':
+            elif handle_npd in ['grad', 'cauchy']:
                 d = g.neg()
-            elif handle_npd == 'cauchy':
-                gnorm = g.norm(p=2)
-                scale = 1 / gnorm
-                gHg = g.dot(hess.mv(g))
-                if gHg > 0:
-                    scale *= torch.clamp_max_(gnorm.pow(3) / gHg, max=1)
-                d = scale * g.neg()
+                if handle_npd == 'cauchy':
+                    # cauchy point for a trust radius of delta=1.
+                    # equivalent to 'grad' with a scaled lr
+                    gnorm = g.norm(p=2)
+                    scale = 1 / gnorm
+                    gHg = g.dot(hess.mv(g))
+                    if gHg > 0:
+                        scale *= torch.clamp_(gnorm.pow(3) / gHg, max=1)
+                    d *= scale
             elif handle_npd == 'eig':
                 # this setting is experimental! use with caution
-                # TODO: why chose the factor 1.5 here? Seems to work best
-                eig0 = eigsh(hess.cpu().numpy(), k=1, which="SA", tol=1e-4,
-                             return_eigenvectors=False).item()
+                # TODO: why use the factor 1.5 here? Seems to work best
+                eig0 = eigsh(hess.cpu().numpy(), k=1, which="SA", tol=1e-4)[0].item()
                 tau = max(1e-3 - 1.5 * eig0, 0)
                 hess.diagonal().add_(tau)
-                d = torch.cholesky_solve(g.neg().unsqueeze(1),
-                                         torch.linalg.cholesky(hess)).squeeze(1)
+                L = torch.linalg.cholesky(hess)
+                d = torch.cholesky_solve(g.neg().unsqueeze(1), L).squeeze(1)
             else:
                 raise RuntimeError('invalid handle_npd encountered.')
 
